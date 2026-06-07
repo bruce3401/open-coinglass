@@ -9,23 +9,6 @@
 
 English | [简体中文](./README.zh-CN.md)
 
----
-
-## ⚠️ Disclaimer — read this first
-
-- This project is provided for **personal, educational and research purposes only**.
-- It is **not affiliated with, endorsed by, or connected to CoinGlass or CoinGecko**
-  in any way. "CoinGlass" and "CoinGecko" are trademarks of their respective owners.
-- The CoinGlass collector works by **rendering public web pages in a headless browser
-  and reading the DOM** (CoinGlass does not expose a free public API for this data).
-  Scraping may be against a site's Terms of Service. **You are responsible for how you
-  use this software.** Check and respect the ToS / `robots.txt` of any site you point
-  it at, and keep request rates reasonable.
-- The software is provided **"AS IS", without warranty of any kind** (see [LICENSE](./LICENSE)).
-- **Maintenance:** this is a best-effort, lightly-maintained project. DOM scrapers are
-  inherently fragile — when CoinGlass changes their page markup, the CoinGlass
-  collectors may break until the selectors are updated. The CoinGecko side uses the
-  official public API and is much more stable.
 
 ---
 
@@ -185,6 +168,23 @@ src/coininfo/
 
 > The internal Python package is named `coininfo` (the project's original name); the
 > repository / distribution is `open-coinglass`. Run it with `python -m coininfo`.
+---
+
+## Disclaimer
+
+- This project is provided for **personal, educational and research purposes only**.
+- It is **not affiliated with, endorsed by, or connected to CoinGlass or CoinGecko**
+  in any way. "CoinGlass" and "CoinGecko" are trademarks of their respective owners.
+- The CoinGlass collector works by **rendering public web pages in a headless browser
+  and reading the DOM** (CoinGlass does not expose a free public API for this data).
+  Scraping may be against a site's Terms of Service. **You are responsible for how you
+  use this software.** Check and respect the ToS / `robots.txt` of any site you point
+  it at, and keep request rates reasonable.
+- The software is provided **"AS IS", without warranty of any kind** (see [LICENSE](./LICENSE)).
+- **Maintenance:** this is a best-effort, lightly-maintained project. DOM scrapers are
+  inherently fragile — when CoinGlass changes their page markup, the CoinGlass
+  collectors may break until the selectors are updated. The CoinGecko side uses the
+  official public API and is much more stable.
 
 ## Contributing
 
