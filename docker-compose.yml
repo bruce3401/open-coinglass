@@ -1,0 +1,12 @@
+services:
+  open-coinglass:
+    build: .
+    container_name: open-coinglass
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file: .env
+    restart: unless-stopped
+    mem_limit: 2g

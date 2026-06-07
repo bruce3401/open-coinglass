@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>open-coinglass Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; }
+  .header { padding: 16px 24px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 18px; color: #58a6ff; }
+  .controls { padding: 16px 24px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  select, button { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
+  select:hover, button:hover { border-color: #58a6ff; }
+  button.active { background: #1f6feb; border-color: #1f6feb; color: white; }
+  .cards { padding: 8px 24px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px 16px; min-width: 160px; }
+  .card .label { font-size: 11px; color: #8b949e; text-transform: uppercase; }
+  .card .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+  .card .sub { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  .pos { color: #3fb950; } .neg { color: #f85149; }
+  .chart-container { padding: 16px 24px; height: calc(100vh - 240px); min-height: 300px; }
+  canvas { background: #161b22; border-radius: 8px; }
+  .status { padding: 8px 24px; font-size: 12px; color: #8b949e; border-top: 1px solid #21262d; }
+  .status span { margin-right: 16px; }
+  .status .ok { color: #3fb950; }
+  .status .err { color: #f85149; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>open-coinglass</h1>
+  <span id="clock" style="color:#8b949e; font-size:13px;"></span>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="controls">
+  <select id="metric">
+    <optgroup label="CoinGlass">
+      <option value="funding_rate">Funding Rate (per exchange)</option>
+      <option value="open_interest">Open Interest</option>
+      <option value="oi_exchange">OI per Exchange</option>
+      <option value="liquidation">Liquidations (Long/Short)</option>
+      <option value="long_short">Long/Short Ratio</option>
+      <option value="market_stats">Market Stats (Global)</option>
+    </optgroup>
+    <optgroup label="CoinGecko + CoinGlass">
+      <option value="price">Price</option>
+      <option value="pct_change">Price Change %</option>
+      <option value="sentiment">Sentiment</option>
+      <option value="volume">Volume (Futures/Spot)</option>
+    </optgroup>
+  </select>
+
+  <select id="symbol">
+    <option value="BTC">BTC</option>
+    <option value="ETH">ETH</option>
+    <option value="SOL">SOL</option>
+  </select>
+
+  <button class="time-btn" data-hours="1">1H</button>
+  <button class="time-btn" data-hours="6">6H</button>
+  <button class="time-btn active" data-hours="24">24H</button>
+  <button class="time-btn" data-hours="168">7D</button>
+  <button class="time-btn" data-hours="720">30D</button>
+</div>
+
+<div class="chart-container">
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="status" id="status">Loading...</div>
+
+<script>
+const API = '';
+let chart = null;
+let hours = 24;
+
+const COLORS = ['#58a6ff','#3fb950','#f0883e','#f85149','#bc8cff','#79c0ff','#d2a8ff','#ffa657','#7ee787','#ff7b72'];
+
+document.querySelectorAll('.time-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    hours = parseInt(btn.dataset.hours);
+    loadData();
+  });
+});
+document.getElementById('metric').addEventListener('change', loadData);
+document.getElementById('symbol').addEventListener('change', loadData);
+
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toISOString().replace('T',' ').substring(0,19) + ' UTC';
+}, 1000);
+
+function fmt(n) {
+  if (n == null) return '-';
+  if (Math.abs(n) >= 1e12) return '$' + (n/1e12).toFixed(2) + 'T';
+  if (Math.abs(n) >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
+  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+  return '$' + n.toFixed(2);
+}
+
+function pctClass(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : ''; }
+
+async function loadCards() {
+  try {
+    const symbol = document.getElementById('symbol').value;
+    const [detail, stats] = await Promise.all([
+      fetch(`${API}/api/coingecko/detail/${symbol}`).then(r => r.json()),
+      fetch(`${API}/api/coinglass/statistics`).then(r => r.json()),
+    ]);
+    const d = detail.data?.[0];
+    const s = stats.data?.[0];
+    let html = '';
+    if (d) {
+      html += `<div class="card"><div class="label">${symbol} Price</div><div class="value">${fmt(d.price_usd)}</div><div class="sub ${pctClass(d.pct_24h)}">${d.pct_24h?.toFixed(2) || '-'}% (24h)</div></div>`;
+      html += `<div class="card"><div class="label">Sentiment</div><div class="value pos">${d.sentiment_up_pct?.toFixed(0) || '-'}%</div><div class="sub">bullish</div></div>`;
+    }
+    if (s) {
+      html += `<div class="card"><div class="label">Total OI</div><div class="value">${fmt(s.total_oi_usd)}</div></div>`;
+      html += `<div class="card"><div class="label">24h Volume</div><div class="value">${fmt(s.total_volume_24h_usd)}</div></div>`;
+      html += `<div class="card"><div class="label">24h Liq</div><div class="value">${fmt(s.total_liq_24h_usd)}</div></div>`;
+    }
+    document.getElementById('cards').innerHTML = html;
+  } catch(e) {}
+}
+
+async function loadData() {
+  const metric = document.getElementById('metric').value;
+  const symbol = document.getElementById('symbol').value;
+  loadCards();
+  try {
+    let datasets;
+    switch(metric) {
+      case 'funding_rate': datasets = await loadFundingRates(symbol); break;
+      case 'open_interest': datasets = await loadSeries(`/api/coinglass/open-interest?symbol=${symbol}&hours=${hours}`, 'oi_usd', `${symbol} OI`); break;
+      case 'oi_exchange': datasets = await loadOIExchange(symbol); break;
+      case 'liquidation': datasets = await loadLiquidations(symbol); break;
+      case 'long_short': datasets = await loadLongShort(symbol); break;
+      case 'market_stats': datasets = await loadMarketStats(); break;
+      case 'price': datasets = await loadDetail(symbol, 'price_usd', `${symbol} Price`); break;
+      case 'pct_change': datasets = await loadPctChange(symbol); break;
+      case 'sentiment': datasets = await loadDetail(symbol, 'sentiment_up_pct', `${symbol} Bullish %`); break;
+      case 'volume': datasets = await loadVolume(symbol); break;
+    }
+    renderChart(datasets);
+    updateStatus();
+  } catch(e) {
+    document.getElementById('status').innerHTML = `<span class="err">Error: ${e.message}</span>`;
+  }
+}
+
+async function fetchData(url) {
+  const r = await fetch(url);
+  return (await r.json()).data || [];
+}
+
+async function loadFundingRates(symbol) {
+  const data = await fetchData(`${API}/api/coinglass/funding-rates?symbol=${symbol}&hours=${hours}`);
+  const byEx = {};
+  for (const d of data) { (byEx[d.exchange] ??= []).push({x: new Date(d.ts), y: d.rate * 100}); }
+  return Object.entries(byEx).map(([ex, pts], i) => ({
+    label: ex, data: pts.sort((a,b) => a.x-b.x),
+    borderColor: COLORS[i%COLORS.length], borderWidth: 1.5, pointRadius: 0, tension: 0.3,
+  }));
+}
+
+async function loadSeries(url, field, label) {
+  const data = await fetchData(url);
+  // Filter to exchange='all' if field is oi_usd
+  const filtered = field === 'oi_usd' ? data.filter(d => d.exchange === 'all') : data;
+  const pts = filtered.map(d => ({x: new Date(d.ts), y: d[field]})).sort((a,b) => a.x-b.x);
+  return [{label, data: pts, borderColor: COLORS[0], borderWidth: 2, pointRadius: 0, fill: {target:'origin',above:'rgba(88,166,255,0.1)'}, tension: 0.3}];
+}
+
+async function loadOIExchange(symbol) {
+  const data = await fetchData(`${API}/api/coinglass/open-interest?symbol=${symbol}&hours=${hours}`);
+  const exData = data.filter(d => d.exchange !== 'all');
+  const byEx = {};
+  for (const d of exData) { (byEx[d.exchange] ??= []).push({x: new Date(d.ts), y: d.oi_usd}); }
+  return Object.entries(byEx).map(([ex, pts], i) => ({
+    label: ex, data: pts.sort((a,b) => a.x-b.x),
+    borderColor: COLORS[i%COLORS.length], borderWidth: 1.5, pointRadius: 0, tension: 0.3,
+  }));
+}
+
+async function loadLiquidations(symbol) {
+  const data = await fetchData(`${API}/api/coinglass/liquidations?symbol=${symbol}&hours=${hours}`);
+  const longs = data.filter(d => d.long_liq_usd > 0).map(d => ({x: new Date(d.ts), y: d.long_liq_usd})).sort((a,b) => a.x-b.x);
+  const shorts = data.filter(d => d.short_liq_usd > 0).map(d => ({x: new Date(d.ts), y: d.short_liq_usd})).sort((a,b) => a.x-b.x);
+  const totals = data.map(d => ({x: new Date(d.ts), y: d.total_liq_usd})).sort((a,b) => a.x-b.x);
+  const sets = [];
+  if (longs.length) sets.push({label:'Long Liq',data:longs,borderColor:'#3fb950',borderWidth:2,pointRadius:0,tension:0.3});
+  if (shorts.length) sets.push({label:'Short Liq',data:shorts,borderColor:'#f85149',borderWidth:2,pointRadius:0,tension:0.3});
+  if (!sets.length) sets.push({label:'Total Liq',data:totals,borderColor:COLORS[0],borderWidth:2,pointRadius:0,tension:0.3});
+  return sets;
+}
+
+async function loadLongShort(symbol) {
+  const data = await fetchData(`${API}/api/coinglass/long-short-ratio?symbol=${symbol}&hours=${hours}`);
+  const byAcc = {};
+  for (const d of data) { (byAcc[d.account] ??= []).push({x: new Date(d.ts), y: d.ratio}); }
+  return Object.entries(byAcc).map(([acc, pts], i) => ({
+    label: acc, data: pts.sort((a,b) => a.x-b.x),
+    borderColor: COLORS[i%COLORS.length], borderWidth: 2, pointRadius: 0, tension: 0.3,
+  }));
+}
+
+async function loadMarketStats() {
+  const data = await fetchData(`${API}/api/coinglass/statistics?hours=${hours}`);
+  const oi = data.map(d => ({x: new Date(d.ts), y: d.total_oi_usd})).sort((a,b) => a.x-b.x);
+  const vol = data.map(d => ({x: new Date(d.ts), y: d.total_volume_24h_usd})).sort((a,b) => a.x-b.x);
+  const liq = data.map(d => ({x: new Date(d.ts), y: d.total_liq_24h_usd})).sort((a,b) => a.x-b.x);
+  return [
+    {label:'Total OI',data:oi,borderColor:COLORS[0],borderWidth:2,pointRadius:0,tension:0.3},
+    {label:'24h Volume',data:vol,borderColor:COLORS[1],borderWidth:2,pointRadius:0,tension:0.3},
+    {label:'24h Liq',data:liq,borderColor:COLORS[3],borderWidth:2,pointRadius:0,tension:0.3},
+  ];
+}
+
+async function loadDetail(symbol, field, label) {
+  const data = await fetchData(`${API}/api/coingecko/detail/${symbol}?hours=${hours}`);
+  const pts = data.map(d => ({x: new Date(d.ts), y: d[field]})).sort((a,b) => a.x-b.x);
+  return [{label, data: pts, borderColor: COLORS[0], borderWidth: 2, pointRadius: 0, fill: {target:'origin',above:'rgba(88,166,255,0.1)'}, tension: 0.3}];
+}
+
+async function loadPctChange(symbol) {
+  const data = await fetchData(`${API}/api/coingecko/detail/${symbol}?hours=${hours}`);
+  const fields = [{f:'pct_1h',l:'1H'},{f:'pct_24h',l:'24H'},{f:'pct_7d',l:'7D'},{f:'pct_14d',l:'14D'},{f:'pct_30d',l:'30D'}];
+  return fields.map((fd, i) => ({
+    label: fd.l,
+    data: data.map(d => ({x: new Date(d.ts), y: d[fd.f]})).sort((a,b) => a.x-b.x),
+    borderColor: COLORS[i%COLORS.length], borderWidth: 2, pointRadius: 0, tension: 0.3,
+  }));
+}
+
+async function loadVolume(symbol) {
+  const data = await fetchData(`${API}/api/coingecko/detail/${symbol}?hours=${hours}`);
+  const fv = data.map(d => ({x: new Date(d.ts), y: d.futures_vol_24h_usd})).filter(d => d.y).sort((a,b) => a.x-b.x);
+  const sv = data.map(d => ({x: new Date(d.ts), y: d.spot_vol_24h_usd})).filter(d => d.y).sort((a,b) => a.x-b.x);
+  const tv = data.map(d => ({x: new Date(d.ts), y: d.volume_24h_usd})).filter(d => d.y).sort((a,b) => a.x-b.x);
+  const sets = [];
+  if (fv.length) sets.push({label:'Futures Vol',data:fv,borderColor:COLORS[0],borderWidth:2,pointRadius:0,tension:0.3});
+  if (sv.length) sets.push({label:'Spot Vol',data:sv,borderColor:COLORS[1],borderWidth:2,pointRadius:0,tension:0.3});
+  if (!sets.length && tv.length) sets.push({label:'Total Vol',data:tv,borderColor:COLORS[0],borderWidth:2,pointRadius:0,tension:0.3});
+  return sets;
+}
+
+function renderChart(datasets) {
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {datasets},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: {intersect:false, mode:'index'},
+      plugins: {
+        legend: {labels:{color:'#8b949e',font:{size:12}}},
+        tooltip: {backgroundColor:'#1c2128',borderColor:'#30363d',borderWidth:1,titleColor:'#c9d1d9',bodyColor:'#c9d1d9'},
+      },
+      scales: {
+        x: {type:'time',time:{tooltipFormat:'MMM d, HH:mm'},grid:{color:'#21262d'},ticks:{color:'#8b949e',maxTicksLimit:10}},
+        y: {grid:{color:'#21262d'},ticks:{color:'#8b949e'}},
+      },
+    },
+  });
+}
+
+async function updateStatus() {
+  try {
+    const data = await (await fetch(`${API}/health`)).json();
+    document.getElementById('status').innerHTML = data.scrapers.map(s => {
+      const cls = s.consecutive_errors > 0 ? 'err' : 'ok';
+      const t = s.last_success ? new Date(s.last_success).toLocaleTimeString() : 'never';
+      return `<span class="${cls}">${s.source}: ${t}</span>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('status').innerHTML = '<span class="err">Status unavailable</span>';
+  }
+}
+
+loadData();
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>

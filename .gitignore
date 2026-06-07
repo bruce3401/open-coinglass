@@ -1,0 +1,19 @@
+# Environment / secrets — never commit real env files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Runtime data & logs
+data/
+logs/
+*.db
+*.db-shm
+*.db-wal
+
+# Misc
+.gstack/
